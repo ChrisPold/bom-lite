@@ -74,13 +74,22 @@ function bijectiveBase26(s: string): number {
   return value;
 }
 
-function pickNewest(candidates: readonly PartNode[]): PartNode {
+/**
+ * Pick the newest revision from a list. Prefers non-OBSOLETE revisions;
+ * falls back to OBSOLETE only when every candidate is OBSOLETE.
+ * Throws if `candidates` is empty — callers should check first.
+ */
+export function pickNewestRevision(
+  candidates: readonly PartNode[],
+): PartNode {
+  if (candidates.length === 0) {
+    throw new Error("pickNewestRevision called with empty candidates");
+  }
   const nonObsolete = candidates.filter((c) => c.status !== "OBSOLETE");
   const pool = nonObsolete.length > 0 ? nonObsolete : candidates;
   const sorted = [...pool].sort((a, b) =>
     compareRevisions(b.revision, a.revision),
   );
-  // pickNewest is only called when candidates.length >= 1, so sorted[0] exists.
   return sorted[0]!;
 }
 
@@ -116,7 +125,7 @@ export function resolveParent(
     }
 
     // Explicit revision does not exist — fall back to heuristic.
-    const fallback = pickNewest(candidates);
+    const fallback = pickNewestRevision(candidates);
     return {
       parentId: fallback.id,
       inferred: true,
@@ -138,7 +147,7 @@ export function resolveParent(
   }
 
   // Case 3: no revision provided — heuristic only.
-  const pick = pickNewest(candidates);
+  const pick = pickNewestRevision(candidates);
   return {
     parentId: pick.id,
     inferred: true,
