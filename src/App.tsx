@@ -1,50 +1,84 @@
-// src/App.tsx
-//
-// Temporary shell that loads the smoke fixture into the store on mount,
-// then renders the DataGridView.
-//
-// T25 replaces this with the real app shell (PAT entry, file loading,
-// view switcher, commit/discard toolbar).
-
-import { useEffect } from "react";
-import { buildGraph } from "./graph/graphBuilder";
+import { useState } from "react";
+import { ErrorBoundary } from "./app/ErrorBoundary";
+import { Toolbar, type Notification } from "./app/Toolbar";
 import { useGraphStore } from "./store/graphStore";
-import { loadGraph } from "./store/actions";
-import { SMOKE_FIXTURE } from "./dev/fixture";
 import { DataGridView } from "./views/grid/DataGridView";
 
 function App() {
-  useEffect(() => {
-    // Only load the fixture if the store is empty — do not overwrite user work.
-    if (useGraphStore.getState().graph.nodes.size === 0) {
-      const { graph } = buildGraph(SMOKE_FIXTURE);
-      loadGraph(graph, "smoke-fixture");
-    }
-  }, []);
+  const [notification, setNotification] = useState<Notification | null>(null);
+  const activeView = useGraphStore((s) => s.ui.activeView);
 
+  return (
+    <ErrorBoundary>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          height: "100vh",
+          fontFamily: "system-ui, sans-serif",
+        }}
+      >
+        <Toolbar onNotify={setNotification} />
+
+        {notification && (
+          <div
+            style={{
+              padding: "8px 16px",
+              fontSize: 13,
+              background: notification.kind === "error" ? "#fdecea" : "#e7f7ed",
+              color: notification.kind === "error" ? "#8b1c14" : "#116329",
+              borderBottom: "1px solid #eee",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <span style={{ flex: 1 }}>{notification.message}</span>
+            <button
+              onClick={() => setNotification(null)}
+              style={{
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                fontSize: 16,
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <ActiveView active={activeView} />
+        </div>
+      </div>
+    </ErrorBoundary>
+  );
+}
+
+function ActiveView({ active }: { active: string }) {
+  if (active === "grid") return <DataGridView />;
+  if (active === "graph") {
+    return <Placeholder title="Node graph view" note="Coming in T22." />;
+  }
+  if (active === "3d") {
+    return <Placeholder title="3D CAD view" note="Coming in T23." />;
+  }
+  return null;
+}
+
+function Placeholder({ title, note }: { title: string; note: string }) {
   return (
     <div
       style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
+        padding: 40,
+        textAlign: "center",
+        color: "#666",
         fontFamily: "system-ui, sans-serif",
       }}
     >
-      <header
-        style={{
-          padding: "12px 20px",
-          borderBottom: "1px solid #ddd",
-          background: "#fafafa",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: 18 }}>
-          BOM-Lite <span style={{ color: "#888", fontSize: 13 }}>— dev preview</span>
-        </h1>
-      </header>
-      <div style={{ flex: 1, minHeight: 0 }}>
-        <DataGridView />
-      </div>
+      <h2 style={{ fontSize: 16 }}>{title}</h2>
+      <p>{note}</p>
     </div>
   );
 }

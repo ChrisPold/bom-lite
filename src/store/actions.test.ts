@@ -8,6 +8,7 @@ import { useGraphStore, __resetStoreForTests } from "./graphStore";
 import {
   addChildNode,
   addSubstitute,
+  commit,
   discard,
   loadGraph,
   removeEdge,
@@ -426,12 +427,8 @@ describe("view/selection actions", () => {
 });
 
 describe("commit", () => {
-  it("throws until T20 wires it", async () => {
-    await expect(
-      (async () => {
-        const { commit } = await import("./actions");
-        await commit("msg");
-      })(),
-    ).rejects.toThrow(/not yet wired/);
+  it("throws when no GitHub token is set", async () => {
+    seedGraph(BASE_ROWS);
+    await expect(commit("msg")).rejects.toThrow(/No GitHub token set/);
   });
 });

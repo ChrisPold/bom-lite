@@ -2,15 +2,6 @@
 //
 // All graph mutations go through here. Views dispatch these; they never
 // call useGraphStore.setState directly.
-//
-// Every mutation:
-//   1. Produces a new immutable graph object (shallow copies of Maps).
-//   2. Marks the affected node/edge/substitute dirty.
-//   3. Invalidates + eagerly recomputes rollup memo entries when cost or
-//      lead time could have changed.
-//
-// The rollup memo is a module-level singleton so views and actions share
-// the same cache without going through React state.
 
 import type {
   BomGraph,
@@ -31,11 +22,9 @@ import {
   markSubstituteDirty,
 } from "./dirtyState";
 import { useGraphStore, type ActiveView } from "./graphStore";
+import { getToken } from "../fetchLayer/tokenStore";
+import { loadRepoConfig } from "../app/repoConfig";
 
-/**
- * Shared rollup cache. Views read from this; actions invalidate it.
- * The object identity is stable for the lifetime of the page.
- */
 export const rollupMemo: RollupMemo = new Map();
 
 // ─── Lifecycle ──────────────────────────────────────────────────────────────
@@ -426,10 +415,65 @@ export function removeSubstitute(substituteEdgeId: string): void {
   state.__setDirty(markSubstituteDirty(state.dirty, substituteEdgeId));
 }
 
-// ─── Commit (wired in T20) ──────────────────────────────────────────────────
+// ─── Commit ─────────────────────────────────────────────────────────────────
 
-export async function commit(_message: string): Promise<void> {
-  throw new Error("commit not yet wired (T20 pending)");
+export interface CommitOutcome {
+  newSha: string | null;
+  conflicts: unknown[] | null;
+}
+
+export async function commit(message: string): Promise<CommitOutcome> {
+  const state = useGraphStore.getState();
+
+  const token = getToken();
+  if (!token) {
+    throw new Error("No GitHub token set");
+  }
+
+  const repoConfig = loadRepoConfig();
+  if (!repoConfig.owner || !repoConfig.repo) {
+    throw new Error("No repository configured");
+  }
+
+  const { commit: commitImpl } = await import("../writeBack/commit");
+
+  const result = await commitImpl({
+    graph: state.graph,
+    baselineGraph: state.baselineGraph,
+    dirty: state.dirty,
+    owner: repoConfig.owner,
+    repo: repoConfig.repo,
+    path: repoConfig.path,
+    branch: repoConfig.branch,
+    token,
+    message,
+  });
+
+  if (result.newSha && result.conflicts === null) {
+    markCommitted(result.newSha);
+  }
+
+  return {
+    newSha: result.newSha,
+    conflicts: result.conflicts ? [...result.conflicts] : null,
+  };
+}
+
+/**
+ * Record a successful commit: the current graph becomes the baseline,
+ * dirty state resets, sha updates. Does NOT touch the live graph.
+ */
+export function markCommitted(sha: string): void {
+  const state = useGraphStore.getState();
+  useGraphStore.setState({
+    baselineGraph: state.graph,
+    dirty: {
+      nodes: new Set(),
+      edges: new Set(),
+      substitutes: new Set(),
+      baselineSha: sha,
+    },
+  });
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
