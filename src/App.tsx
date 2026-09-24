@@ -1,122 +1,132 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+// src/App.tsx
+//
+// TEMPORARY dev smoke harness. Renders the graph built from SMOKE_FIXTURE
+// as a nested text tree so you can eyeball the pipeline output.
+//
+// This file will be replaced by the real app shell in T25.
 
-function App() {
-  const [count, setCount] = useState(0)
+import { useMemo } from "react";
+import { buildGraph } from "./graph/graphBuilder";
+import type { BomGraph, PartNode } from "./graph/types";
+import { SMOKE_FIXTURE } from "./dev/fixture";
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+interface TreeNode {
+  node: PartNode;
+  edgeId: string | null;
+  qty: number | null;
+  children: TreeNode[];
 }
 
-export default App
+function buildTree(graph: BomGraph): TreeNode[] {
+  const visited = new Set<string>();
+
+  function walk(nodeId: string, edgeId: string | null, qty: number | null): TreeNode {
+    const node = graph.nodes.get(nodeId);
+    if (!node) {
+      throw new Error(`Missing node: ${nodeId}`);
+    }
+    if (visited.has(nodeId)) {
+      return { node, edgeId, qty, children: [] };
+    }
+    visited.add(nodeId);
+
+    const edgeIds = graph.edgesByParent.get(nodeId) ?? [];
+    const children: TreeNode[] = edgeIds.map((eid) => {
+      const edge = graph.edges.get(eid);
+      if (!edge) throw new Error(`Missing edge: ${eid}`);
+      return walk(edge.childId, edge.id, edge.qtyPerParent);
+    });
+
+    return { node, edgeId, qty, children };
+  }
+
+  return graph.roots.map((rootId) => walk(rootId, null, null));
+}
+
+function TreeRow({ tree, depth }: { tree: TreeNode; depth: number }) {
+  const { node, qty, children } = tree;
+  return (
+    <div>
+      <div style={{ paddingLeft: depth * 24, fontFamily: "monospace" }}>
+        {depth > 0 ? "└─ " : "● "}
+        <strong>{node.id}</strong>
+        {qty !== null && <span style={{ color: "#888" }}> × {qty}</span>}
+        {" — "}
+        {node.description || <em>(no description)</em>}
+        <span style={{ color: "#888" }}>
+          {" "}
+          [{node.status}, {node.uom}, cost {node.unitCost}, LT {node.leadTimeDays}d]
+        </span>
+      </div>
+      {children.map((c) => (
+        <TreeRow key={c.edgeId ?? c.node.id} tree={c} depth={depth + 1} />
+      ))}
+    </div>
+  );
+}
+
+function App() {
+  const { graph, diagnostics } = useMemo(
+    () => buildGraph(SMOKE_FIXTURE),
+    [],
+  );
+
+  const tree = useMemo(() => buildTree(graph), [graph]);
+
+  return (
+    <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
+      <h1>BOM-Lite — T7 smoke harness</h1>
+      <p style={{ color: "#666" }}>
+        This is a temporary debug view. It loads a hardcoded fixture, runs it
+        through <code>buildGraph</code>, and renders the result as a tree.
+      </p>
+
+      <h2>Summary</h2>
+      <ul>
+        <li>Nodes: {graph.nodes.size}</li>
+        <li>Edges: {graph.edges.size}</li>
+        <li>Substitutes: {graph.substitutes.size}</li>
+        <li>Roots: {graph.roots.length}</li>
+        <li>Cycles: {graph.cycles.length}</li>
+        <li>Orphans: {graph.orphans.length}</li>
+        <li>Diagnostics: {diagnostics.length}</li>
+      </ul>
+
+      <h2>Tree</h2>
+      <div>
+        {tree.map((t) => (
+          <TreeRow key={t.node.id} tree={t} depth={0} />
+        ))}
+      </div>
+
+      <h2>Substitutes</h2>
+      {graph.substitutes.size === 0 ? (
+        <p><em>none</em></p>
+      ) : (
+        <ul>
+          {[...graph.substitutes.values()].map((s) => (
+            <li key={s.id} style={{ fontFamily: "monospace" }}>
+              {s.primaryId} ⇄ {s.substituteId}
+              {s.scopeParentId ? ` (scope: ${s.scopeParentId})` : " (global)"}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h2>Diagnostics</h2>
+      {diagnostics.length === 0 ? (
+        <p><em>none</em></p>
+      ) : (
+        <ul>
+          {diagnostics.map((d, i) => (
+            <li key={i} style={{ fontFamily: "monospace", color: d.severity === "error" ? "red" : "#b86e00" }}>
+              [{d.severity}] row {d.rowIndex}: {d.code} — {d.message}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export default App;
