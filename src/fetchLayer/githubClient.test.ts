@@ -40,8 +40,6 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 function bytesResponse(status: number, bytes: Uint8Array): Response {
-  // TS strict rejects Uint8Array as BodyInit in the current DOM lib.
-  // Pass a sliced ArrayBuffer so the type is unambiguously BodyInit.
   const ab = bytes.buffer.slice(
     bytes.byteOffset,
     bytes.byteOffset + bytes.byteLength,
@@ -97,7 +95,6 @@ describe("fetchMasterFile", () => {
       jsonResponse(200, { sha: "s", size: MAX_FILE_BYTES + 1 }),
     );
     await expect(fetchMasterFile(REPO)).rejects.toBeInstanceOf(SizeLimitError);
-    // Only the metadata call was made — no bytes downloaded.
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -146,7 +143,6 @@ describe("commitMasterFile", () => {
     expect(body.sha).toBe("oldsha");
     expect(body.branch).toBe("main");
     expect(body.message).toBe("update");
-    // "hello" in base64 is "aGVsbG8="
     expect(body.content).toBe("aGVsbG8=");
   });
 
@@ -155,7 +151,7 @@ describe("commitMasterFile", () => {
       jsonResponse(200, { content: { sha: "s" } }),
     );
 
-    const buf = new Uint8Array([104, 101, 108, 108, 111]).buffer; // "hello"
+    const buf = new Uint8Array([104, 101, 108, 108, 111]).buffer;
     await commitMasterFile({
       ...REPO,
       content: buf,
@@ -183,33 +179,8 @@ describe("commitMasterFile", () => {
     ).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it("throws ConflictError with remoteSha on 409", async () => {
-    // First call: PUT returns 409
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse(409, {}))
-      // Second call: metadata fetch to get the fresh sha
-      .mockResolvedValueOnce(
-        jsonResponse(200, { sha: "freshsha", size: 100 }),
-      );
-
-    try {
-      await commitMasterFile({
-        ...REPO,
-        content: "x",
-        sha: "stale",
-        message: "m",
-      });
-      expect.fail("expected ConflictError");
-    } catch (err) {
-      expect(err).toBeInstanceOf(ConflictError);
-      expect((err as ConflictError).remoteSha).toBe("freshsha");
-    }
-  });
-
-  it("throws ConflictError without remoteSha when metadata also fails", async () => {
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse(409, {}))
-      .mockRejectedValueOnce(new TypeError("network down"));
+  it("throws ConflictError with undefined remoteSha on 409", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(409, {}));
 
     try {
       await commitMasterFile({
@@ -223,6 +194,13 @@ describe("commitMasterFile", () => {
       expect(err).toBeInstanceOf(ConflictError);
       expect((err as ConflictError).remoteSha).toBeUndefined();
     }
+  });
+
+  it("throws ConflictError on 412", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(412, {}));
+    await expect(
+      commitMasterFile({ ...REPO, content: "x", sha: "s", message: "m" }),
+    ).rejects.toBeInstanceOf(ConflictError);
   });
 
   it("wraps network errors on the PUT", async () => {

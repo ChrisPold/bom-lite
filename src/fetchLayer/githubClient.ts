@@ -106,18 +106,9 @@ export async function commitMasterFile(
   }
 
   if (response.status === 409 || response.status === 412) {
-    // Fetch the current remote SHA so the caller can run a 3-way merge.
-    let remoteSha: string | undefined;
-    try {
-      const meta = await ghFetchJson(url, opts.token);
-      if (typeof meta.sha === "string") remoteSha = meta.sha;
-    } catch {
-      // best-effort; ConflictError.remoteSha may be undefined
-    }
-    throw new ConflictError(
-      "Remote file changed since last fetch",
-      remoteSha,
-    );
+    // Caller (writeBack/commit) is responsible for fetching the fresh
+    // remote and running the 3-way merge. We just signal the conflict.
+    throw new ConflictError("Remote file changed since last fetch");
   }
 
   if (response.status === 401 || response.status === 403) {
