@@ -1,18 +1,21 @@
 // src/worker/workerClient.ts
 //
-// Main-thread wrapper around the parse worker.
+// Main-thread parse entry point.
 //
-// NOTE: when you pass an ArrayBuffer, it is transferred to the worker and
-// becomes detached on the caller side. Use the File overload if you want
-// to keep a reference to the bytes.
+// NOTE: The parse worker is currently bypassed. Vite 8 + Rolldown in dev
+// mode has issues instantiating module workers, and the pipeline is fast
+// enough on the main thread for realistic file sizes. The worker files
+// (parse.worker.ts, protocol.ts) are kept so this can be re-enabled once
+// the underlying toolchain stabilizes.
+//
+// To re-enable the worker, replace the body of parseFile with the version
+// that constructed `new Worker(new URL("./parse.worker.ts", import.meta.url),
+// { type: "module" })` and round-tripped a ParseRequest. The serialization
+// helpers in protocol.ts handle the Map <-> array-of-tuples conversion.
 
+import { runPipeline } from "./pipeline";
 import type { BomGraph } from "../graph/types";
 import type { RowDiagnostic } from "../parser/schema";
-import {
-  deserializeGraph,
-  type ParseRequest,
-  type ParseResponse,
-} from "./protocol";
 
 export interface ParsedGraph {
   graph: BomGraph;
@@ -25,33 +28,9 @@ export async function parseFile(
   const arrayBuffer =
     input instanceof ArrayBuffer ? input : await input.arrayBuffer();
 
-  return new Promise<ParsedGraph>((resolve, reject) => {
-    const worker = new Worker(
-      new URL("./parse.worker.ts", import.meta.url),
-      { type: "module" },
-    );
+  // Yield to the event loop once so the caller's await has a chance to
+  // update UI (spinner) before we block on parsing.
+  await Promise.resolve();
 
-    worker.onmessage = (event: MessageEvent<ParseResponse>) => {
-      worker.terminate();
-      const msg = event.data;
-      if (msg.kind === "parsed") {
-        resolve({
-          graph: deserializeGraph(msg.payload),
-          diagnostics: msg.diagnostics,
-        });
-      } else {
-        const err = new Error(msg.message);
-        if (msg.stack) err.stack = msg.stack;
-        reject(err);
-      }
-    };
-
-    worker.onerror = (event) => {
-      worker.terminate();
-      reject(new Error(`Worker error: ${event.message}`));
-    };
-
-    const request: ParseRequest = { kind: "parse", arrayBuffer };
-    worker.postMessage(request, [arrayBuffer]);
-  });
+  return runPipeline(arrayBuffer);
 }
