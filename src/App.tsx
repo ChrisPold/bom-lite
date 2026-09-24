@@ -3,6 +3,7 @@ import { ErrorBoundary } from "./app/ErrorBoundary";
 import { Toolbar, type Notification } from "./app/Toolbar";
 import { useGraphStore } from "./store/graphStore";
 import { DataGridView } from "./views/grid/DataGridView";
+import { NodeGraphView } from "./views/graph/NodeGraphView";
 
 function App() {
   const [notification, setNotification] = useState<Notification | null>(null);
@@ -58,9 +59,7 @@ function App() {
 
 function ActiveView({ active }: { active: string }) {
   if (active === "grid") return <DataGridView />;
-  if (active === "graph") {
-    return <Placeholder title="Node graph view" note="Coming in T22." />;
-  }
+  if (active === "graph") return <NodeGraphView />;
   if (active === "3d") {
     return <Placeholder title="3D CAD view" note="Coming in T23." />;
   }
