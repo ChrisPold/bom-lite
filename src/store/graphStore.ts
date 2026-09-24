@@ -9,13 +9,12 @@
 //   - Mutations go through actions (see actions.ts). Views never set state.
 //   - The store lives on the main thread only. No worker imports.
 //   - Nothing here fetches, parses, or renders.
+//   - Collapsing a node clears its entire subtree from the expanded set,
+//     so re-expanding shows only direct children.
 
 import { create } from "zustand";
 import type { BomGraph } from "../graph/types";
-import {
-  emptyDirtyState,
-  type DirtyState,
-} from "./dirtyState";
+import { emptyDirtyState, type DirtyState } from "./dirtyState";
 
 export type ActiveView = "grid" | "graph" | "3d";
 
@@ -36,8 +35,6 @@ export interface GraphStoreState {
   selection: Selection;
   ui: UiState;
 
-  // Low-level setters. Higher-level actions live in actions.ts and call
-  // these through the store's setter.
   __setGraph: (graph: BomGraph) => void;
   __loadFresh: (graph: BomGraph, sha: string | null) => void;
   __discard: () => void;
@@ -68,6 +65,44 @@ const INITIAL_UI: UiState = {
   graphExpandedNodes: new Set(),
 };
 
+/**
+ * Walk the subtree under `startNodeId` and delete every visited node
+ * from `set`. Cycle-safe.
+ */
+function clearSubtree(
+  graph: BomGraph,
+  startNodeId: string,
+  set: Set<string>,
+): void {
+  const visited = new Set<string>();
+  const queue: string[] = [startNodeId];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    set.delete(current);
+    for (const eid of graph.edgesByParent.get(current) ?? []) {
+      const edge = graph.edges.get(eid);
+      if (edge) queue.push(edge.childId);
+    }
+  }
+}
+
+function toggleInSet(
+  current: ReadonlySet<string>,
+  key: string,
+  graph: BomGraph,
+): Set<string> {
+  const next = new Set(current);
+  if (next.has(key)) {
+    // Collapse: remove the key and every descendant.
+    clearSubtree(graph, key, next);
+  } else {
+    next.add(key);
+  }
+  return next;
+}
+
 export const useGraphStore = create<GraphStoreState>((set, get) => ({
   graph: EMPTY_GRAPH,
   baselineGraph: EMPTY_GRAPH,
@@ -97,33 +132,36 @@ export const useGraphStore = create<GraphStoreState>((set, get) => ({
 
   __setDirty: (dirty) => set({ dirty }),
 
-  __selectNode: (nodeId) =>
-    set({ selection: { selectedNodeId: nodeId } }),
+  __selectNode: (nodeId) => set({ selection: { selectedNodeId: nodeId } }),
 
   __setActiveView: (view) =>
     set((state) => ({ ui: { ...state.ui, activeView: view } })),
 
   __toggleGridRow: (edgeId) =>
-    set((state) => {
-      const next = new Set(state.ui.gridExpandedRows);
-      if (next.has(edgeId)) next.delete(edgeId);
-      else next.add(edgeId);
-      return { ui: { ...state.ui, gridExpandedRows: next } };
-    }),
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        gridExpandedRows: toggleInSet(
+          state.ui.gridExpandedRows,
+          edgeId,
+          state.graph,
+        ),
+      },
+    })),
 
   __toggleGraphNode: (nodeId) =>
-    set((state) => {
-      const next = new Set(state.ui.graphExpandedNodes);
-      if (next.has(nodeId)) next.delete(nodeId);
-      else next.add(nodeId);
-      return { ui: { ...state.ui, graphExpandedNodes: next } };
-    }),
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        graphExpandedNodes: toggleInSet(
+          state.ui.graphExpandedNodes,
+          nodeId,
+          state.graph,
+        ),
+      },
+    })),
 }));
 
-/**
- * Reset the store to its initial state. Test helper only.
- * Not exported from the app — used by unit tests to isolate cases.
- */
 export function __resetStoreForTests(): void {
   useGraphStore.setState({
     graph: EMPTY_GRAPH,

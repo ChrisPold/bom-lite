@@ -31,6 +31,67 @@ function tinyGraph(): BomGraph {
   };
 }
 
+function makeNode(id: string): PartNode {
+  const [partNumber, revision] = id.split("::");
+  return {
+    id,
+    partNumber: partNumber!,
+    revision: revision!,
+    description: "",
+    status: "RELEASED",
+    uom: "EA",
+    unitCost: 0,
+    leadTimeDays: 0,
+  };
+}
+
+function makeEdge(
+  parentId: string,
+  childId: string,
+  rowIndex: number,
+): ConsumesEdge {
+  return {
+    id: `${parentId}->${childId}::row${rowIndex}`,
+    parentId,
+    childId,
+    qtyPerParent: 1,
+    rowIndex,
+  };
+}
+
+function chainGraph(): BomGraph {
+  // A::A -> B::A -> C::A
+  const nodes = new Map<string, PartNode>([
+    ["A::A", makeNode("A::A")],
+    ["B::A", makeNode("B::A")],
+    ["C::A", makeNode("C::A")],
+  ]);
+
+  const e1 = makeEdge("A::A", "B::A", 0);
+  const e2 = makeEdge("B::A", "C::A", 1);
+
+  return {
+    nodes,
+    edges: new Map([
+      [e1.id, e1],
+      [e2.id, e2],
+    ]),
+    substitutes: new Map(),
+    edgesByParent: new Map([
+      ["A::A", [e1.id]],
+      ["B::A", [e2.id]],
+    ]),
+    edgesByChild: new Map([
+      ["B::A", [e1.id]],
+      ["C::A", [e2.id]],
+    ]),
+    substitutesByPart: new Map(),
+    roots: ["A::A"],
+    orphans: [],
+    cycles: [],
+  };
+}
+
 beforeEach(() => {
   __resetStoreForTests();
 });
@@ -155,5 +216,44 @@ describe("__toggleGridRow / __toggleGraphNode", () => {
     const s = useGraphStore.getState();
     expect(s.ui.gridExpandedRows.has("e1")).toBe(true);
     expect(s.ui.gridExpandedRows.has("e2")).toBe(true);
+  });
+
+  it("collapsing a node clears its descendants from the graph expanded set", () => {
+    useGraphStore.setState({ graph: chainGraph() });
+
+    useGraphStore.getState().__toggleGraphNode("A::A");
+    useGraphStore.getState().__toggleGraphNode("B::A");
+    expect(useGraphStore.getState().ui.graphExpandedNodes.has("A::A")).toBe(
+      true,
+    );
+    expect(useGraphStore.getState().ui.graphExpandedNodes.has("B::A")).toBe(
+      true,
+    );
+
+    // Collapse A: B and C should also be removed.
+    useGraphStore.getState().__toggleGraphNode("A::A");
+    expect(useGraphStore.getState().ui.graphExpandedNodes.has("A::A")).toBe(
+      false,
+    );
+    expect(useGraphStore.getState().ui.graphExpandedNodes.has("B::A")).toBe(
+      false,
+    );
+  });
+
+  it("collapsing a node clears its descendants from the grid expanded set", () => {
+    useGraphStore.setState({ graph: chainGraph() });
+
+    useGraphStore.getState().__toggleGridRow("A::A");
+    useGraphStore.getState().__toggleGridRow("B::A");
+    expect(useGraphStore.getState().ui.gridExpandedRows.has("A::A")).toBe(true);
+    expect(useGraphStore.getState().ui.gridExpandedRows.has("B::A")).toBe(true);
+
+    useGraphStore.getState().__toggleGridRow("A::A");
+    expect(useGraphStore.getState().ui.gridExpandedRows.has("A::A")).toBe(
+      false,
+    );
+    expect(useGraphStore.getState().ui.gridExpandedRows.has("B::A")).toBe(
+      false,
+    );
   });
 });
